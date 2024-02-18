@@ -12,7 +12,7 @@ env:
 jobs:
   pull-data:
     name: Steam Pull
-    runs-on: python-bookworm
+    runs-on: ubuntu-latest
     steps:
     - name: Check-out Repo
       uses: actions/checkout@v2
