@@ -26,4 +26,4 @@ jobs:
       shell: sh
 
     - name: Pull Data
-      run: python /SteamPull/app.py
+      run: python SteamPull/app.py
