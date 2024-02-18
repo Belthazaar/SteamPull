@@ -78,7 +78,16 @@ def process_bandwidth_per_region(d):
     except Exception as e:
         logger.error(f'Error inserting bandwidth per region for {d.get("label")}: {e}')
         return
-    # ts_set = set()
+
+    region_ts_global = list(
+        db.global_bandwidth.find({
+            rname: {
+                '$exists': True
+            }
+        }, {
+            'timestamp': 1
+        }).distinct('timestamp'))
+
     for i in d.get('data'):
         try:
             row = {
@@ -86,7 +95,7 @@ def process_bandwidth_per_region(d):
                 'bandwidth': int(i[1])
             }
 
-            if db.global_traffic.find_one({'timestamp': row['timestamp'], rname: {'$exists': True}}):
+            if row['timestamp'] in region_ts_global:
                 continue
             elif db.global_bandwidth.find_one({'timestamp': row['timestamp']}):
                 db.global_bandwidth.update_one({'timestamp': row['timestamp']}, {'$set': {rname: row['bandwidth']}})
