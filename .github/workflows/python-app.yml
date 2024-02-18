@@ -17,16 +17,13 @@ jobs:
     - name: Set up Python3.12
       uses: actions/setup-python@v4 
       with:
-        python-version: '3.12' 
+        python-version: '3.12'
+        
     - name: Check-out Repo
-      uses: actions/checkout@v2
-      with:
-        repository: Belthazaar/SteamPull
-        token: ${{ secrets.GITHUB_TOKEN }}
-        path: SteamPull
+      uses: actions/checkout@v4
 
     - name: Install Dependencies
-      run: python -m pip install -r SteamPull/requirements.txt
+      run: python -m pip install -r requirements.txt
 
     - name: Pull Data
-      run: python SteamPull/app.py
+      run: python app.py
