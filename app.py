@@ -6,7 +6,6 @@ import requests
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.collection import Collection
-from threading import Thread
 
 load_dotenv()
 API_KEY = os.environ.get('STEAM_API_KEY')
@@ -86,8 +85,7 @@ def process_bandwidth_per_region(d):
                 'timestamp': datetime.datetime.fromtimestamp(i[0] / 1000, tz=datetime.timezone.utc),
                 'bandwidth': int(i[1])
             }
-            # if row['timestamp'] not in ts_set:
-            # ts_set.add(row['timestamp'])
+
             if db.global_traffic.find_one({'timestamp': row['timestamp'], rname: {'$exists': True}}):
                 continue
             elif db.global_bandwidth.find_one({'timestamp': row['timestamp']}):
@@ -116,13 +114,8 @@ def get_contentserver_bandwidth_stacked(date: str, db):
     for a in jj.get('legend'):
         summary_data[a.get('name')] = {'cur': int(a.get('cur')), 'max': int(a.get('max'))}
     logger.debug(f'Got contentserver bandwidth stacked: {summary_data}')
-    threads = []
     for d in json.loads(jj.get('json')):
-        p = Thread(target=process_bandwidth_per_region, args=(d,))
-        threads.append(p)
-        p.start()
-    for t in threads:
-        t.join()
+        process_bandwidth_per_region(d)
     try:
         db['bandwidth_summary'].insert_one(summary_data)
     except Exception as e:
