@@ -6,6 +6,7 @@ on:
       - master
   schedule:
     - cron: '*/10 * * * *'
+  workflow_dispatch:
 
 env:
   STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
