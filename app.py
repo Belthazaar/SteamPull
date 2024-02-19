@@ -47,7 +47,7 @@ class MongoDBHandler(logging.Handler):
     def format_record_for_mongodb(self, record):
         """Formats the log record into a dictionary for MongoDB."""
         return {
-            "timestamp": record.created,
+            "timestamp": datetime.datetime.fromtimestamp(record.created, datetime.UTC),
             "level": record.levelname,
             "message": record.getMessage(),
             "module": record.module,
