@@ -4,8 +4,9 @@ import logging
 import os
 import requests
 from dotenv import load_dotenv
-from pymongo import MongoClient
+from pymongo import MongoClient, errors
 from pymongo.collection import Collection
+from threading import Thread
 
 load_dotenv()
 API_KEY = os.environ.get('STEAM_API_KEY')
@@ -101,6 +102,9 @@ def process_bandwidth_per_region(d):
                 db.global_bandwidth.update_one({'timestamp': row['timestamp']}, {'$set': {rname: row['bandwidth']}})
             else:
                 db.global_bandwidth.insert_one({'timestamp': row['timestamp'], rname: row['bandwidth']})
+        except errors.DuplicateKeyError:
+            db.global_bandwidth.update_one({'timestamp': row['timestamp']}, {'$set': {rname: row['bandwidth']}})
+            continue
         except Exception as e:
             logger.error(f'Error inserting/updating global bandwidth for {d.get("label")}: {e}')
             continue
@@ -123,8 +127,14 @@ def get_contentserver_bandwidth_stacked(date: str, db):
     for a in jj.get('legend'):
         summary_data[a.get('name')] = {'cur': int(a.get('cur')), 'max': int(a.get('max'))}
     logger.debug(f'Got contentserver bandwidth stacked: {summary_data}')
+    threads = []
     for d in json.loads(jj.get('json')):
-        process_bandwidth_per_region(d)
+        t = Thread(target=process_bandwidth_per_region, args=(d,))
+        # process_bandwidth_per_region(d)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
     try:
         db['bandwidth_summary'].insert_one(summary_data)
     except Exception as e:
@@ -326,14 +336,24 @@ def process_global(db):
 
 def get_all_cache_details(cell_ids, cache_ids, hour: str, utc_date: str, date: str, db):
 
+    threads = []
     for i in cell_ids:
-        get_cm_details(i, db)
-    for i in cache_ids:
-        get_cache_details(i, db)
+        t = Thread(target=get_cm_details, args=(i, db))
+        t.start()
+        threads.append(t)
 
-    get_top_asns_per_country(utc_date, db)
+    for i in cache_ids:
+        t = Thread(target=get_cache_details, args=(i, db))
+        t.start()
+
+    asn_t = Thread(target=get_top_asns_per_country, args=(utc_date, db))
+    asn_t.start()
     get_download_traffic_per_country(utc_date, db)
+    content_t = Thread(target=get_download_traffic_per_country, args=(utc_date, db))
+    content_t.start()
     get_contentserver_bandwidth_stacked(utc_date, db)
+    for t in threads:
+        t.join()
     process_global(db)
 
 
