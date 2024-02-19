@@ -1,6 +1,11 @@
 name: On Push Run
 
-on: push
+on: 
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: '*/10 * * * *'
 
 env:
   STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
