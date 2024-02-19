@@ -12,7 +12,7 @@ load_dotenv()
 API_KEY = os.environ.get('STEAM_API_KEY')
 MONGO_URI = os.environ.get('MONGO_URI')
 DB_NAME = os.environ.get('DB_NAME')
-LOG_DB_NAME = os.environ.get('LOG_DB', None)
+LOG_DB_NAME = os.environ.get('LOG_DB_NAME', None)
 LOG_LEVEL = logging.getLevelName(os.environ.get('LOG_LEVEL', 'info').upper())
 
 base_url = 'http://api.steampowered.com/'
@@ -75,7 +75,13 @@ def process_bandwidth_per_region(d):
             bw = i[1]
             entries.append({'timestamp': ts, 'bandwidth': int(bw)})
 
-        db[name].insert_many(entries)
+        db[name].insert_many(entries, ordered=False, bypass_document_validation=True)
+    except errors.BulkWriteError as e:
+        logger.warning(f'Dups found inserting bandwidth per region for {d.get("label")}')
+        panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
+        if len(panic_list) > 0:
+            logger.error(f"these are not duplicate errors {panic_list}")
+            return
     except Exception as e:
         logger.error(f'Error inserting bandwidth per region for {d.get("label")}: {e}')
         return
@@ -130,13 +136,14 @@ def get_contentserver_bandwidth_stacked(date: str, db):
     threads = []
     for d in json.loads(jj.get('json')):
         t = Thread(target=process_bandwidth_per_region, args=(d,))
-        # process_bandwidth_per_region(d)
         t.start()
         threads.append(t)
     for t in threads:
         t.join()
     try:
         db['bandwidth_summary'].insert_one(summary_data)
+    except errors.DuplicateKeyError:
+        logger.warning(f'Dups found inserting bandwidth summary')
     except Exception as e:
         logger.error(f'Error inserting bandwidth summary: {e}')
         return
@@ -169,8 +176,14 @@ def get_download_traffic_per_country(date: str, db):
         return
     logger.debug(f'Got download traffic per country: {countries}')
     try:
-        db['download_per_country'].insert_many(countries)
+        db['download_per_country'].insert_many(countries, ordered=False, bypass_document_validation=True)
         logger.debug(f'Inserted download traffic per country')
+    except errors.BulkWriteError as e:
+        logger.warning(f'Dups found inserting download traffic per country')
+        panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
+        if len(panic_list) > 0:
+            logger.error(f"these are not duplicate errors {panic_list}")
+            return
     except Exception as e:
         logger.error(f'Error inserting download traffic per country: {e}')
         return
@@ -208,8 +221,14 @@ def get_top_asns_per_country(date, db):
             continue
     logger.debug(f'Formatted asns per country: {countries}')
     try:
-        db['top_asns_per_country'].insert_many(countries)
+        db['top_asns_per_country'].insert_many(countries, ordered=False, bypass_document_validation=True)
         logger.debug(f'Inserted asns per country')
+    except errors.BulkWriteError as e:
+        logger.warning(f'Dups found inserting top asns per country')
+        panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
+        if len(panic_list) > 0:
+            logger.error(f"these are not duplicate errors {panic_list}")
+            return
     except Exception as e:
         logger.error(f'Error inserting top asns per country: {e}')
         return
@@ -252,7 +271,13 @@ def get_cache_details(cell_id, db):
             logger.error(f'Error formatting cache details for cell {cell_id}: {e}')
             continue
     try:
-        db["cache"].insert_many(servers)
+        db["cache"].insert_many(servers, ordered=False, bypass_document_validation=True)
+    except errors.BulkWriteError as e:
+        logger.warning(f'Dups found inserting cache details for cell {cell_id}')
+        panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
+        if len(panic_list) > 0:
+            logger.error(f"these are not duplicate errors {panic_list}")
+            return
     except Exception as e:
         logger.error(f'Error inserting cache details for cell {cell_id}: {e}')
         return
@@ -302,8 +327,14 @@ def get_cm_details(cell_id, db):
             continue
 
     try:
-        db["cm"].insert_many(entries)
+        db["cm"].insert_many(entries, ordered=False, bypass_document_validation=True)
         logger.debug(f'Inserted cm details for cell {cell_id}')
+    except errors.BulkWriteError as e:
+        logger.warning(f'Dups found inserting cm details for cell {cell_id}')
+        panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
+        if len(panic_list) > 0:
+            logger.error(f"these are not duplicate errors {panic_list}")
+            return
     except Exception as e:
         logger.error(f'Error inserting cm details for cell {cell_id}: {e}')
         return
