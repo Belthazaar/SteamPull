@@ -77,7 +77,7 @@ def process_bandwidth_per_region(d):
 
         db[name].insert_many(entries, ordered=False, bypass_document_validation=True)
     except errors.BulkWriteError as e:
-        logger.warning(f'Dups found inserting bandwidth per region for {d.get("label")}')
+        logger.debug(f'Dups found inserting bandwidth per region for {d.get("label")}')
         panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
@@ -143,7 +143,7 @@ def get_contentserver_bandwidth_stacked(date: str, db):
     try:
         db['bandwidth_summary'].insert_one(summary_data)
     except errors.DuplicateKeyError:
-        logger.warning(f'Dups found inserting bandwidth summary')
+        logger.debug(f'Dups found inserting bandwidth summary')
     except Exception as e:
         logger.error(f'Error inserting bandwidth summary: {e}')
         return
@@ -179,7 +179,7 @@ def get_download_traffic_per_country(date: str, db):
         db['download_per_country'].insert_many(countries, ordered=False, bypass_document_validation=True)
         logger.debug(f'Inserted download traffic per country')
     except errors.BulkWriteError as e:
-        logger.warning(f'Dups found inserting download traffic per country')
+        logger.debug(f'Dups found inserting download traffic per country')
         panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
@@ -217,14 +217,14 @@ def get_top_asns_per_country(date, db):
                 })
             countries.append(country)
         except Exception as e:
-            logger.error(f'Error formattinf top asn for country: {e}')
+            logger.error(f'Error formatting top asn for country: {e}')
             continue
     logger.debug(f'Formatted asns per country: {countries}')
     try:
         db['top_asns_per_country'].insert_many(countries, ordered=False, bypass_document_validation=True)
         logger.debug(f'Inserted asns per country')
     except errors.BulkWriteError as e:
-        logger.warning(f'Dups found inserting top asns per country')
+        logger.debug(f'Dups found inserting top asns per country')
         panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
@@ -273,7 +273,7 @@ def get_cache_details(cell_id, db):
     try:
         db["cache"].insert_many(servers, ordered=False, bypass_document_validation=True)
     except errors.BulkWriteError as e:
-        logger.warning(f'Dups found inserting cache details for cell {cell_id}')
+        logger.debug(f'Dups found inserting cache details for cell {cell_id}')
         panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
@@ -287,6 +287,7 @@ def get_cm_details(cell_id, db):
 
     cm_params = params.copy()
     cm_params['cellid'] = cell_id
+    # cm_cache_detail = cm_cache_details.copy()
     try:
         resp = get('ISteamDirectory', 'GetCMListForConnect', 1, cm_params)
     except Exception as e:
@@ -315,7 +316,7 @@ def get_cm_details(cell_id, db):
             }
 
             for region in cm_cache_detail:
-                if region['cm'] == entry['metadata']['dc']:
+                if region['cm'] != '' and region['cm'] in ['dc']:
                     entry['metadata']['region'] = region['region']
                     entry['metadata']['code'] = region['code']
                     entry['metadata']['city'] = region['city']
@@ -330,7 +331,7 @@ def get_cm_details(cell_id, db):
         db["cm"].insert_many(entries, ordered=False, bypass_document_validation=True)
         logger.debug(f'Inserted cm details for cell {cell_id}')
     except errors.BulkWriteError as e:
-        logger.warning(f'Dups found inserting cm details for cell {cell_id}')
+        logger.debug(f'Dups found inserting cm details for cell {cell_id}')
         panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
@@ -441,6 +442,8 @@ if __name__ == "__main__":
         'cell_id': int(k),
         'cm': v['cm'],
         'cache': v['cache'],
-        'region': v['region']
-    } for k, v in cell_id_to_region.items() if v['cm']]
+        'code': v['code'],
+        'region': v['region'],
+        'city': v['city']
+    } for k, v in cell_id_to_region.items()]
     main()
