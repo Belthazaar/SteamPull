@@ -98,18 +98,18 @@ def get_cache_details(cell_id, t_id, attempt=0):
                 "load": server['load'],
             }
             if 'cell_id' in server:
+                uq['cell_id'] = server['cell_id']
                 if server['cell_id'] not in [c['cell_id'] for c in cm_cache_detail if c['cache']]:
                     uq['first_seen'] = time_stamp
                     logger.info(f"Completely new unseen cache ID found: {server['cell_id']}")
                 else:
                     cell_details = cell_id_to_region[server['cell_id']]
-                    uq['cell_id'] = server['cell_id']
                     uq['region'] = cell_details['region']
                     uq['code'] = cell_details['code']
                     uq['city'] = cell_details['city']
 
             if server['host'] not in seen_caches:
-                server['first_seen'] = time_stamp
+                uq['first_seen'] = time_stamp
                 logger.info(f"Completely new unseen cache host found: {server['host']}")
             unique_caches.append(uq)
         if not unique_caches:
