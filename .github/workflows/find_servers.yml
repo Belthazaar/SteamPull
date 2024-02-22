@@ -5,7 +5,7 @@ on:
     branches:
       - master
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '* */1 * * *'
   workflow_dispatch:
 
 env:
@@ -17,7 +17,7 @@ env:
 
 jobs:
   pull-data:
-    name: Steam Pull
+    name: Find Endpoints
     runs-on: ubuntu-latest
     steps:
     - name: Set up Python3.12
