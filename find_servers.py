@@ -274,13 +274,22 @@ def get_database():
     return client[DB_NAME]
 
 
-def get_all_cache_details(cell_ids, cache_ids, t_id):
-
+def get_all_cache_details(cell_ids, t_id):
     for i in cell_ids:
-        get_cm_details(i, t_id)
+        threads = []
+        t1 = Thread(target=get_cache_details, args=(i, t_id))
+        threads.append(t1)
+        t2 = Thread(target=get_cm_details, args=(i, t_id))
+        threads.append(t2)
+        t3 = Thread(target=get_china_cache_details, args=(i, t_id))
+        threads.append(t3)
+        t4 = Thread(target=get_cm_china_details, args=(i, t_id))
+        threads.append(t4)
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
-    for i in cache_ids:
-        get_cache_details(i, t_id)
 
 
 def get_log_db():
@@ -294,13 +303,12 @@ def main():
     start_time = time.time()
     logger.info("Let's start")
     cell_ids = range(1, 500)
-    cache_ids = range(1, 500)
 
-    num_threads = 10
+    num_threads = 5
     threads = []
     for i in range(num_threads):
         threads.append(
-            Thread(target=get_all_cache_details, args=(cell_ids[i::num_threads], cache_ids[i::num_threads], i)))
+            Thread(target=get_all_cache_details, args=(cell_ids[i::num_threads], i)))
         threads[i].start()
     for t in threads:
         t.join()
