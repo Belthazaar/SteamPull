@@ -1,12 +1,15 @@
+'''
+Pull data from Steam API and store it in MongoDB
+'''
 import datetime
 import json
 import logging
 import os
+from threading import Thread
 import requests
 from dotenv import load_dotenv
 from pymongo import MongoClient, errors
 from pymongo.collection import Collection
-from threading import Thread
 
 load_dotenv()
 API_KEY = os.environ.get('STEAM_API_KEY')
@@ -15,18 +18,18 @@ DB_NAME = os.environ.get('DB_NAME')
 LOG_DB_NAME = os.environ.get('LOG_DB_NAME', None)
 LOG_LEVEL = logging.getLevelName(os.environ.get('LOG_LEVEL', 'info').upper())
 
-base_url = 'http://api.steampowered.com/'
+BASE_URL = 'http://api.steampowered.com/'
 
 params = {
     'format': 'json',
     'key': API_KEY,
 }
 
-pub_stats_url = "https://cdn.cloudflare.steamstatic.com/steam/publicstats/"
+STATS_URL = "https://cdn.cloudflare.steamstatic.com/steam/publicstats/"
 
-now = datetime.datetime.now(datetime.UTC)
-minut = (now.minute // 10) * 10
-rounded_ts = now.replace(minute=minut, second=0, microsecond=0)
+start = datetime.datetime.now(datetime.UTC)
+minut = (start.minute // 10) * 10
+rounded_ts = start.replace(minute=minut, second=0, microsecond=0)
 time_stamp = rounded_ts
 
 cm_cache_detail = []
@@ -35,6 +38,12 @@ cell_id_to_region = {}
 
 
 class MongoDBHandler(logging.Handler):
+    """
+    A custom logging handler that sends log records to MongoDB.
+
+    Args:
+        collection (pymongo.collection.Collection): The MongoDB collection to insert log records into.
+    """
 
     def __init__(self, collection: Collection):
         super().__init__()
@@ -55,11 +64,21 @@ class MongoDBHandler(logging.Handler):
         }
 
 
-def process_bandwidth_per_region(d):
+def process_bandwidth_per_region(d, logger):
+    """
+    Process bandwidth data per region and store it in the database.
+
+    Args:
+        d (dict): The raw bandwidth data for a region.
+        logger: The logger object for logging errors.
+
+    Returns:
+        None
+    """
     try:
         db = get_database()
-    except Exception as e:
-        logger.error(f'Error getting database: {e}')
+    except errors.PyMongoError as ex:
+        logger.error(f'Error getting database: {ex}')
         return
     try:
         rname = d.get('label').replace(' ', '_') + ''
@@ -71,20 +90,18 @@ def process_bandwidth_per_region(d):
         ]
         entries = []
         for i in data:
-            ts = datetime.datetime.fromtimestamp(i[0] / 1000, tz=datetime.timezone.utc)
-            bw = i[1]
-            entries.append({'timestamp': ts, 'bandwidth': int(bw)})
+            entries.append({
+                'timestamp': datetime.datetime.fromtimestamp(i[0] / 1000, tz=datetime.timezone.utc),
+                'bandwidth': int(i[1])
+            })
 
         db[name].insert_many(entries, ordered=False, bypass_document_validation=True)
-    except errors.BulkWriteError as e:
+    except errors.BulkWriteError as err:
         logger.debug(f'Dups found inserting bandwidth per region for {d.get("label")}')
-        panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
+        panic_list = list(filter(lambda x: x['code'] != 11000, err.details['writeErrors']))
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
             return
-    except Exception as e:
-        logger.error(f'Error inserting bandwidth per region for {d.get("label")}: {e}')
-        return
 
     region_ts_global = list(
         db.global_bandwidth.find({
@@ -111,17 +128,25 @@ def process_bandwidth_per_region(d):
         except errors.DuplicateKeyError:
             db.global_bandwidth.update_one({'timestamp': row['timestamp']}, {'$set': {rname: row['bandwidth']}})
             continue
-        except Exception as e:
-            logger.error(f'Error inserting/updating global bandwidth for {d.get("label")}: {e}')
-            continue
 
 
-def get_contentserver_bandwidth_stacked(date: str, db):
-    url = pub_stats_url + "contentserver_bandwidth_stacked.jsonp?v=" + date
+def get_contentserver_bandwidth_stacked(date: str, db, logger):
+    """
+    Retrieves content server bandwidth data for a specific date and stores it in the database.
+
+    Args:
+        date (str): The date for which to retrieve the bandwidth data.
+        db: The database object to store the data.
+        logger: The logger object for logging debug and error messages.
+
+    Returns:
+        None
+    """
+    url = STATS_URL + "contentserver_bandwidth_stacked.jsonp?v=" + date
     try:
-        r = requests.get(url)
+        r = requests.get(url, timeout=60) 
         logger.debug(f'Got contentserver bandwidth stacked: {r.text}')
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         logger.error(f'Error getting contentserver bandwidth stacked: {e}')
         return
     data = r.text
@@ -135,7 +160,7 @@ def get_contentserver_bandwidth_stacked(date: str, db):
     logger.debug(f'Got contentserver bandwidth stacked: {summary_data}')
     threads = []
     for d in json.loads(jj.get('json')):
-        t = Thread(target=process_bandwidth_per_region, args=(d,))
+        t = Thread(target=process_bandwidth_per_region, args=(d, logger))
         t.start()
         threads.append(t)
     for t in threads:
@@ -143,22 +168,29 @@ def get_contentserver_bandwidth_stacked(date: str, db):
     try:
         db['bandwidth_summary'].insert_one(summary_data)
     except errors.DuplicateKeyError:
-        logger.debug(f'Dups found inserting bandwidth summary')
-    except Exception as e:
-        logger.error(f'Error inserting bandwidth summary: {e}')
-        return
+        logger.debug('Dups found inserting bandwidth summary')
 
 
-def get_download_traffic_per_country(date: str, db):
-    url = pub_stats_url + "download_traffic_per_country.jsonp?v=" + date
+def get_download_traffic_per_country(date: str, db, logger):
+    """
+    Retrieves the download traffic per country for a given date and stores it in the database.
+
+    Args:
+        date (str): The date for which to retrieve the download traffic per country.
+        db: The database connection object.
+        logger: The logger object for logging.
+
+    Returns:
+        None
+    """
+    url = STATS_URL + "download_traffic_per_country.jsonp?v=" + date
     try:
-        r = requests.get(url)
+        r = requests.get(url, timeout=60)
         logger.debug(f'Got download traffic per country: {r.text}')
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         logger.error(f'Error getting download traffic per country: {e}')
         return
     try:
-
         data = r.text
         form = data.split('(')[1].split(')')[0]
         formated_file = json.loads(form)
@@ -171,37 +203,50 @@ def get_download_traffic_per_country(date: str, db):
                 'avgmbps': float(formated_file.get(c).get('avgmbps'))
             }
             countries.append(country)
-    except Exception as e:
+    except ValueError as e:
+        logger.error(f'Error formatting download traffic per country: {e}')
+        return
+    except TypeError as e:
         logger.error(f'Error formatting download traffic per country: {e}')
         return
     logger.debug(f'Got download traffic per country: {countries}')
     try:
         db['download_per_country'].insert_many(countries, ordered=False, bypass_document_validation=True)
-        logger.debug(f'Inserted download traffic per country')
+        logger.debug('Inserted download traffic per country')
     except errors.BulkWriteError as e:
-        logger.debug(f'Dups found inserting download traffic per country')
+        logger.debug('Dups found inserting download traffic per country')
         panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
             return
-    except Exception as e:
-        logger.error(f'Error inserting download traffic per country: {e}')
-        return
 
 
-def get_top_asns_per_country(date, db):
-    url = pub_stats_url + "top_asns_per_country.jsonp?v=" + date
+def get_top_asns_per_country(date, db, logger):
+    """
+    Retrieves the top ASNs (Autonomous System Numbers) per country for a given date.
+
+    Args:
+        date (str): The date for which to retrieve the top ASNs per country.
+        db: The database object used for inserting the retrieved data.
+        logger: The logger object used for logging errors and debug information.
+
+    Returns:
+        None
+    """
+    url = STATS_URL + "top_asns_per_country.jsonp?v=" + date
     try:
-        r = requests.get(url)
+        r = requests.get(url, timeout=60)
         logger.debug(f'Got top asns per country: {r.text}')
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         logger.error(f'Error getting top asns per country: {e}')
         return
-
+    except json.JSONDecodeError as e:
+        logger.error(f'Error formatting top asns per country: {e}')
+        return
     try:
         raw_text = r.text
         formated_file = json.loads(raw_text.split('onCountryASNData(')[1].split(');')[0])
-    except Exception as e:
+    except json.JSONDecodeError as e:
         logger.error(f'Error formatting top asns per country: {e}')
         return
     countries = []
@@ -216,45 +261,68 @@ def get_top_asns_per_country(date, db):
                     'avgmbps': float(asn.get('avgmbps'))
                 })
             countries.append(country)
-        except Exception as e:
+        except ValueError as e:
             logger.error(f'Error formatting top asn for country: {e}')
             continue
     logger.debug(f'Formatted asns per country: {countries}')
     try:
         db['top_asns_per_country'].insert_many(countries, ordered=False, bypass_document_validation=True)
-        logger.debug(f'Inserted asns per country')
+        logger.debug('Inserted asns per country')
     except errors.BulkWriteError as e:
-        logger.debug(f'Dups found inserting top asns per country')
+        logger.debug('Dups found inserting top asns per country')
         panic_list = list(filter(lambda x: x['code'] != 11000, e.details['writeErrors']))
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
             return
-    except Exception as e:
-        logger.error(f'Error inserting top asns per country: {e}')
-        return
 
 
-def get(interface, method, version, params):
-    url = base_url + interface + '/' + method + '/v' + str(version) + '/'
-    response = requests.get(url, params=params)
+def get(interface, method, version, param, logger):
+    """
+    Sends a GET request to the specified interface, method, and version with the given parameters.
+
+    Args:
+        interface (str): The interface to send the request to.
+        method (str): The method to call on the interface.
+        version (int): The version of the method to call.
+        param (dict): The parameters to include in the request.
+        logger: The logger object to use for logging.
+
+    Returns:
+        dict: The JSON response from the request.
+
+    Raises:
+        ConnectionError: If the request fails with a non-OK status code.
+    """
+    url = BASE_URL + interface + '/' + method + '/v' + str(version) + '/'
+    response = requests.get(url, params=param, timeout=60)
     if not response.ok:
-        raise Exception(f'Error getting {url}: {response.status_code}')
+        raise ConnectionError(f'Error getting {url}: {response.status_code}')
     logger.debug(f'Got {url}: {response.json()}')
     return response.json()
 
 
-def get_cache_details(cell_id, db):
+def get_cache_details(cell_id, db, logger):
+    """
+    Retrieves cache details for a given cell ID and inserts them into the database.
 
+    Args:
+        cell_id (int): The ID of the cell.
+        db: The database object.
+        logger: The logger object.
+
+    Returns:
+        None
+    """
     cache_params = params.copy()
     cache_params['cell_id'] = cell_id
     try:
-        resp = get('IContentServerDirectoryService', 'GetServersForSteamPipe', 1, cache_params)
-    except Exception as e:
+        resp = get('IContentServerDirectoryService', 'GetServersForSteamPipe', 1, cache_params, logger)
+    except ConnectionError as e:
         logger.error(f'Error getting cache details for cell {cell_id}: {e}')
         return
     try:
         servers = resp['response']['servers']
-    except Exception as e:
+    except (ValueError, KeyError) as e:
         logger.error(f'Error getting servers list for cell {cell_id}: {e}')
         return
     for server in servers:
@@ -267,7 +335,7 @@ def get_cache_details(cell_id, db):
                 server['region'] = cell_details['region']
                 server['code'] = cell_details['code']
                 server['city'] = cell_details['city']
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.error(f'Error formatting cache details for cell {cell_id}: {e}')
             continue
     try:
@@ -278,24 +346,30 @@ def get_cache_details(cell_id, db):
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
             return
-    except Exception as e:
-        logger.error(f'Error inserting cache details for cell {cell_id}: {e}')
-        return
 
 
-def get_cm_details(cell_id, db):
+def get_cm_details(cell_id, db, logger):
+    """
+    Retrieves CM details for a given cell ID and inserts them into the database.
 
+    Args:
+        cell_id (str): The ID of the cell.
+        db (Database): The database object.
+        logger (Logger): The logger object.
+
+    Returns:
+        None
+    """
     cm_params = params.copy()
     cm_params['cellid'] = cell_id
-    # cm_cache_detail = cm_cache_details.copy()
     try:
-        resp = get('ISteamDirectory', 'GetCMListForConnect', 1, cm_params)
-    except Exception as e:
+        resp = get('ISteamDirectory', 'GetCMListForConnect', 1, cm_params, logger)
+    except ConnectionError as e:
         logger.error(f'Error getting cm details for cell {cell_id}: {e}')
         return
     try:
         servers = resp['response']['serverlist']
-    except Exception as e:
+    except (ValueError, KeyError) as e:
         logger.error(f'Error getting cm list for cell {cell_id}: {e}')
         return
     entries = []
@@ -323,7 +397,7 @@ def get_cm_details(cell_id, db):
                     break
 
             entries.append(entry)
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             logger.error(f'Error formatting cm details for cell {cell_id}: {e}')
             continue
 
@@ -336,19 +410,31 @@ def get_cm_details(cell_id, db):
         if len(panic_list) > 0:
             logger.error(f"these are not duplicate errors {panic_list}")
             return
-    except Exception as e:
-        logger.error(f'Error inserting cm details for cell {cell_id}: {e}')
-        return
 
 
 def get_database():
+    """
+    Returns the MongoDB database object.
+
+    :return: MongoDB database object.
+    """
     connection_string = MONGO_URI
 
     client = MongoClient(connection_string)
     return client[DB_NAME]
 
 
-def process_global(db):
+def process_global(db, logger):
+    """
+    Process global bandwidth data for each row in the database.
+
+    Args:
+        db: The database object.
+        logger: The logger object.
+
+    Returns:
+        None
+    """
     traffic_query = list(db.global_bandwidth.find({'Global': {'$exists': False}}))
     regions = [
         'Africa', 'Asia', 'Central_America', 'Europe', 'Oceania', 'North_America', 'Russia', 'South_America',
@@ -361,35 +447,53 @@ def process_global(db):
                 glob_traffic += row[r]
             db.global_bandwidth.update_one({'_id': row['_id']}, {'$set': {'Global': glob_traffic}})
             logger.debug(f'Updated global bandwidth for {row["timestamp"]}\tGlobal: {glob_traffic}\n{row}')
-        except Exception as e:
+        except (errors.WriteError, KeyError, ValueError) as e:
             logger.error(f'Error processing global bandwidth: {e}')
             continue
 
 
-def get_all_cache_details(cell_ids, cache_ids, hour: str, utc_date: str, date: str, db):
+def get_all_cache_details(cell_ids, cache_ids, utc_date: str, db, logger):
+    """
+    Retrieves cache details for all specified cell IDs and cache IDs.
+
+    Args:
+        cell_ids (list): List of cell IDs.
+        cache_ids (list): List of cache IDs.
+        utc_date (str): UTC date in string format.
+        db: Database connection object.
+        logger: Logger object.
+
+    Returns:
+        None
+    """
 
     threads = []
     for i in cell_ids:
-        t = Thread(target=get_cm_details, args=(i, db))
+        t = Thread(target=get_cm_details, args=(i, db, logger))
         t.start()
         threads.append(t)
 
     for i in cache_ids:
-        t = Thread(target=get_cache_details, args=(i, db))
+        t = Thread(target=get_cache_details, args=(i, db, logger))
         t.start()
 
-    asn_t = Thread(target=get_top_asns_per_country, args=(utc_date, db))
+    asn_t = Thread(target=get_top_asns_per_country, args=(utc_date, db, logger))
     asn_t.start()
-    get_download_traffic_per_country(utc_date, db)
-    content_t = Thread(target=get_download_traffic_per_country, args=(utc_date, db))
+    get_download_traffic_per_country(utc_date, db, logger)
+    content_t = Thread(target=get_download_traffic_per_country, args=(utc_date, db, logger))
     content_t.start()
-    get_contentserver_bandwidth_stacked(utc_date, db)
+    get_contentserver_bandwidth_stacked(utc_date, db, logger)
     for t in threads:
         t.join()
-    process_global(db)
+    process_global(db, logger)
 
 
 def get_log_db():
+    """
+    Returns the MongoDB database object for logging.
+
+    :return: MongoDB database object
+    """
     connection_string = MONGO_URI
 
     client = MongoClient(connection_string)
@@ -397,29 +501,16 @@ def get_log_db():
 
 
 def main():
-    logger.info('Starting cache pull')
-
-    utc_now = datetime.datetime.now(datetime.UTC)
-    utc_str = utc_now.strftime("%m-%d-%Y-%H")
-    now = datetime.datetime.now()
-    db = get_database()
-    logger.info(f'Pulling steam data')
-
-    cell_ids = [1, 14, 15, 25, 26, 31, 32, 33, 35, 38, 4, 40, 5, 50, 52, 63, 64, 65, 66, 92, 116, 118, 117, 8]
-    cache_ids = [52, 92, 25, 14, 5, 33, 32, 15, 38, 35, 26, 40, 66, 4, 50, 65, 63, 64, 1, 31]
-
-    get_all_cache_details(cell_ids, cache_ids, now.strftime('%H%M'), utc_str, now.strftime('%Y%m%d'), db)
-
-    logger.info(f'Cache pull done')
-
-
-if __name__ == "__main__":
+    """
+    Entry point of the application.
+    Loads environment variables, initializes logging, and performs cache pull.
+    """
     load_dotenv()
     logger = logging.getLogger('SteamCachePuller')
     stream_handler = logging.StreamHandler()
-    FORMAT = logging.Formatter('[%(asctime)s %(filename)s:%(lineno)s - %(funcName)10s()] %(message)s',
-                               datefmt='%Y-%m-%d %H:%M:%S')
-    stream_handler.setFormatter(FORMAT)
+    fmt = logging.Formatter('[%(asctime)s %(filename)s:%(lineno)s - %(funcName)10s()] %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
+    stream_handler.setFormatter(fmt)
     logger.addHandler(stream_handler)
     if LOG_DB_NAME:
         try:
@@ -428,16 +519,21 @@ if __name__ == "__main__":
             log_handler = MongoDBHandler(log_collection)
             log_handler.setLevel(LOG_LEVEL)
             logger.addHandler(log_handler)
-        except Exception as e:
-            logger.error(f'Error getting log database: {e}')
+        except errors.ConnectionFailure as e:
+            logger.error(f'Error connecting to log database: {e}')
+        except errors.OperationFailure as e:
+            logger.error(f'Error performing operation on log database: {e}')
     logger.setLevel(LOG_LEVEL)
     try:
-        with open('CellMap.json', 'r') as f:
-            cell_id_to_region = json.load(f)
-            cell_id_to_region = {int(k): v for k, v in cell_id_to_region.items()}
-    except Exception as e:
+        with open('CellMap.json', 'r', encoding='utf-8') as f:
+            cid_to_region = json.load(f)
+            global cell_id_to_region #pylint: disable=global-statement
+            cell_id_to_region = {int(k): v for k, v in cid_to_region.items()}  #pylint: disable=redefined-outer-name
+    except json.JSONDecodeError as e:
         logger.critical(f'Error opening cell map: {e}')
         os._exit(1)
+    #pylint: disable=unused-variable, redefined-outer-name, global-statement
+    global cm_cache_detail
     cm_cache_detail = [{
         'cell_id': int(k),
         'cm': v['cm'],
@@ -446,4 +542,21 @@ if __name__ == "__main__":
         'region': v['region'],
         'city': v['city']
     } for k, v in cell_id_to_region.items()]
+    logger.info('Starting cache pull')
+
+    utc_now = datetime.datetime.now(datetime.UTC)
+    utc_str = utc_now.strftime("%m-%d-%Y-%H")
+    db = get_database()
+    logger.info('Pulling steam data')
+
+    cell_ids = [1, 14, 15, 25, 26, 31, 32, 33, 35, 38, 4, 40, 5, 50, 52, 63, 64, 65, 66, 92, 116, 118, 117, 8]
+    cache_ids = [52, 92, 25, 14, 5, 33, 32, 15, 38, 35, 26, 40, 66, 4, 50, 65, 63, 64, 1, 31]
+
+    get_all_cache_details(cell_ids, cache_ids, utc_str, db, logger)
+
+    logger.info('Cache pull done')
+
+
+if __name__ == "__main__":
+
     main()
