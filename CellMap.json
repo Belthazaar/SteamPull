@@ -38,7 +38,7 @@
   "48": { "region": "Asia", "code": "CHN", "cm": "", "cache": "", "city": "Chengdu", "steamchina": true },
   "49": { "region": "North_America", "code": "USA", "cm": "", "cache": "", "city": "Denver" },
   "50": { "region": "North_America", "code": "USA", "cm": "atl", "cache": "atl", "city": "Atlanta" },
-  "51": { "region": "Oceania", "code": "AUS", "cm": "", "cache": "", "city": "Brisbane" },
+  "51": { "region": "Oceania", "code": "AUS", "cm": "", "cache": "bne", "city": "Brisbane" },
   "52": { "region": "Oceania", "code": "AUS", "cm": "syd", "cache": "syd", "city": "Sydney" },
   "53": { "region": "Oceania", "code": "AUS", "cm": "", "cache": "mel", "city": "Melbourne" },
   "54": { "region": "Oceania", "code": "AUS", "cm": "", "cache": "", "city": "Adelaide" },
