@@ -594,8 +594,9 @@ def main():
     db = get_database()
     logger.info('Pulling steam data')
 
-    cell_ids = [1, 14, 15, 25, 26, 31, 32, 33, 35, 38, 4, 40, 5, 50, 52, 63, 64, 65, 66, 92, 116, 118, 117, 8, 36]
-    cache_ids = [52, 92, 25, 14, 5, 33, 32, 15, 38, 35, 26, 40, 66, 4, 50, 65, 63, 64, 1, 31, 53, 55, 127]
+    cell_ids = [k for k, v in cell_id_to_region.items() if v['cm'] != '']
+
+    cache_ids = [k for k, v in cell_id_to_region.items() if v['cache'] != '']
 
     get_all_cache_details(cell_ids, cache_ids, utc_str, db, logger)
 
