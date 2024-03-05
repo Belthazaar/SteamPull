@@ -21,6 +21,7 @@ BASE_URL = 'http://api.steampowered.com/'
 params = {
     'format': 'json',
     'key': API_KEY,
+    'max_servers': 200
 }
 
 STATS_URL = "https://cdn.cloudflare.steamstatic.com/steam/publicstats/"

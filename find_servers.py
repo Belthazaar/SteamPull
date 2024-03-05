@@ -23,6 +23,7 @@ chin_url = 'http://api.steamchina.com/'
 params = {
     'format': 'json',
     'key': API_KEY,
+    'max_servers': 200
 }
 
 now = datetime.datetime.now(datetime.UTC)
