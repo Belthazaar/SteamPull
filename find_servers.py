@@ -272,6 +272,8 @@ def get_database():
     connection_string = MONGO_URI
 
     client = MongoClient(connection_string)
+    if not DB_NAME:
+        raise errors.ConfigurationError('No database name provided')
     return client[DB_NAME]
 
 
@@ -297,6 +299,8 @@ def get_log_db():
     connection_string = MONGO_URI
 
     client = MongoClient(connection_string)
+    if not LOG_DB_NAME:
+        raise errors.ConfigurationError('No log database name provided')
     return client[LOG_DB_NAME]
 
 
@@ -329,7 +333,7 @@ if __name__ == "__main__":
     logger.addHandler(stream_handler)
     try:
         get_database()
-    except (errors.ConnectionFailure, errors.ServerSelectionTimeoutError) as e:
+    except (errors.ConnectionFailure, errors.ServerSelectionTimeoutError, errors.ConfigurationError) as e:
         logger.critical(f'Error connecting to database: {e}')
         os._exit(1)
     if LOG_DB_NAME:
@@ -339,7 +343,7 @@ if __name__ == "__main__":
             log_handler = MongoDBHandler(log_collection)
             log_handler.setLevel(LOG_LEVEL)
             logger.addHandler(log_handler)
-        except Exception as e:
+        except (errors.ConnectionFailure, errors.ServerSelectionTimeoutError, errors.ConfigurationError) as e:
             logger.error(f'Error getting log database: {e}')
     logger.setLevel(LOG_LEVEL)
     try:

@@ -3,8 +3,9 @@ import datetime
 import json
 import logging
 import os
-from threading import Thread
 import requests
+import sys
+from threading import Thread
 from dotenv import load_dotenv
 from pymongo import MongoClient, errors
 from pymongo.collection import Collection
@@ -101,6 +102,8 @@ def process_bandwidth_per_region(data, logger):
     except (ValueError, KeyError) as err:
         logger.error(f'Error processing bandwidth per region: {err}')
         return
+    if not entries:
+        raise ValueError('No entries found to insert. Is the Steam site down?')
     insert_many(db, name, entries, logger, f'bandwidth per region for {rname}')
     process_global_bandwidth(data, rname, logger, db)
 
@@ -241,6 +244,9 @@ def get_download_traffic_per_country(date: str, db, logger):
         logger.error(f'Error formatting download traffic per country: {err}')
         return
     logger.debug(f'Got download traffic per country: {countries}')
+    if not countries:
+        logger.error('No entries found to insert. Is the Steam site down?')
+        return
     insert_many(db, 'download_per_country', countries, logger, 'download traffic per country')
 
 
@@ -287,6 +293,9 @@ def get_top_asns_per_country(date, db, logger):
             logger.error(f'Error formatting top asn for country: {err}')
             continue
     logger.debug(f'Formatted asns per country: {countries}')
+    if not countries:
+        logger.error('No entries found to insert. Is the Steam site down?')
+        return
     insert_many(db, 'top_asns_per_country', countries, logger, 'top asns per country')
 
 
@@ -358,6 +367,9 @@ def get_cache_details(cell_id, db, logger):
         except (ValueError, KeyError) as err:
             logger.error(f'Error formatting cache details for cell {cell_id}: {err}')
             continue
+    if not servers:
+        logger.error('No server entries found to insert. Is the Steam site down?')
+        return
     insert_many(db, "cache", servers, logger, f'cell {cell_id}')
 
 
@@ -415,6 +427,9 @@ def get_cm_details(cell_id, db, logger):
         except (ValueError, KeyError) as err:
             logger.error(f'Error formatting cm details for cell {cell_id}: {err}')
             continue
+    if not servers:
+        logger.error('No server entries found to insert. Is the Steam site down?')
+        return
     insert_many(db, "cm", entries, logger, f'cell {cell_id}')
 
 
@@ -458,6 +473,8 @@ def get_database():
     connection_string = MONGO_URI
 
     client = MongoClient(connection_string)
+    if not DB_NAME:
+        raise errors.ConfigurationError('DB_NAME environment variable not set')
     return client[DB_NAME]
 
 
@@ -542,6 +559,8 @@ def get_log_db():
     connection_string = MONGO_URI
 
     client = MongoClient(connection_string)
+    if not LOG_DB_NAME:
+        raise SystemExit('LOG_DB_NAME environment variable not set')
     return client[LOG_DB_NAME]
 
 
